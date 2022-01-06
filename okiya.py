@@ -4,6 +4,31 @@ from PIL import ImageFont
 from PIL import ImageDraw
 
 
+def turn_number(tiles):
+    return len(np.where(tiles>15))
+
+
+def unzip(full_int, cell_count):
+    part_a = full_int>>(4*cell_count)
+    part_b = full_int>>(4*cell_count-1)&int('1111',2)
+    part_c = full_int&int('1111',2)
+    return part_a, part_b, part_c
+
+
+def split_list_n(lst, n):
+    n = int(np.ceil(len(lst)/n))
+    return [lst[i:i+n] for i in range(0, len(lst), n)]
+
+
+def bin_interpretation(i,lead_zero_count = 0): #16
+    clear_bin = bin(i)[2:]
+    if lead_zero_count:
+        lead_zeros = ''.join(['0' for z in range(lead_zero_count-len(clear_bin))])
+    else:
+        lead_zeros = ''
+    return lead_zeros+clear_bin
+
+
 def draw_text(text, font_size, color, img):
     font = ImageFont.truetype("/usr/share/fonts/truetype/freefont/FreeMono.ttf", font_size, encoding="unic")
     draw = ImageDraw.Draw(img)
@@ -49,4 +74,6 @@ def draw_tiles(tiles, draw_numbers = True, hi_res = True):
             tile_row = np.concatenate((tile_row, tile), axis=0)
 
     im = Image.fromarray(tile_row)
-    im.save('images/tiles.png')
+    img_path = 'images/tiles.png'
+    im.save(img_path)
+    return img_path
