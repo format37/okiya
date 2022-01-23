@@ -8,11 +8,17 @@ def turn_number(tiles):
     return len(np.where(tiles>15))
 
 
-def unzip(full_int, cell_count):
+"""def unzip(full_int, cell_count):
     part_a = full_int>>(4*cell_count)
     part_b = full_int>>(4*cell_count-1)&int('1111',2)
     part_c = full_int&int('1111',2)
     return part_a, part_b, part_c
+"""
+
+def unzip(gpu_out):
+    tokens = gpu_out>>16
+    tile_mask = gpu_out&int(''.join(['1' for i in range(16)]),2)
+    return tokens, tile_mask
 
 
 def split_list_n(lst, n):
