@@ -7,4 +7,6 @@ Game can reach to 16 turns.
 64Gb of operative memory is enought for 11 steps  
 3.3Gb hard drive spent to save 10 steps of game
 #### Cuda approach
-in process..
+Not solved yet. The last solution represented in cuda_6.ipynb
+#### RL approach
+Coming soon..
