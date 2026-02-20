@@ -1,0 +1,6 @@
+archive/
+solution/
+__pycache__/
+*.pyc
+images/board*.png
+images/tiles.png
