@@ -30,6 +30,7 @@ P1_OVERLAY    = (35, 55, 195, 110)
 P0_COLOR      = (210, 35, 35)
 P1_COLOR      = (35, 55, 195)
 GOLD          = (255, 200, 0)
+BROWN         = (140, 80, 20)
 TEXT_COLOR     = (40, 40, 40)
 MUTED_COLOR   = (100, 100, 100)
 BTN_COLOR     = (180, 175, 160)
@@ -181,6 +182,7 @@ class OkiyaGUI:
         self.font_tiny   = pygame.font.Font(FONT_PATH, sz(11))
         self.font_btn    = pygame.font.Font(FONT_PATH, sz(14))
         self.font_player = pygame.font.Font(FONT_PATH, sz(40))
+        self.font_tile   = pygame.font.Font(FONT_PATH, sz(14))
 
         # Tile images
         self.tiles.rescale(self.tile_px)
@@ -315,6 +317,18 @@ class OkiyaGUI:
 
     # -- Drawing --
 
+    def _draw_glow_text(self, surface, font, text, x, y,
+                        fg=BLACK, glow=WHITE):
+        """Render text with a white glow (outline) behind black text."""
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                g = font.render(text, True, glow)
+                surface.blit(g, (x + dx, y + dy))
+        t = font.render(text, True, fg)
+        surface.blit(t, (x, y))
+
     def _draw_board(self):
         screen = self.screen
         m0, m1, lp = self.game.mask_p0, self.game.mask_p1, self.game.last_pos
@@ -375,24 +389,27 @@ class OkiyaGUI:
                         (x0 + pad - i - 1, y0 + pad - i - 1,
                          tile_px + 2 * (i + 1), tile_px + 2 * (i + 1)), 1)
 
-            # Position number (top-left)
-            pos_txt = self.font_tiny.render(str(pos), True, (255, 255, 60))
-            screen.blit(pos_txt, (x0 + pad + 3, y0 + pad + 1))
+            # Position number (top-left) — white glow + black text
+            self._draw_glow_text(screen, self.font_tile, str(pos),
+                                 x0 + pad + 3, y0 + pad + 1)
 
-            # Tile type id (top-right)
-            tid = self.font_tiny.render(f"t{tile_type}", True, (255, 255, 60))
-            screen.blit(tid, (x0 + pad + tile_px - tid.get_width() - 3,
-                              y0 + pad + 1))
+            # Tile type id (top-right) — white glow + black text
+            tid_surf = self.font_tile.render(f"t{tile_type}", True, BLACK)
+            tid_x = x0 + pad + tile_px - tid_surf.get_width() - 3
+            tid_y = y0 + pad + 1
+            self._draw_glow_text(screen, self.font_tile, f"t{tile_type}",
+                                 tid_x, tid_y)
 
-            # Tile attributes (bottom, unclaimed only)
+            # Tile attributes (bottom, unclaimed only) — white glow + black
             if not claimed:
                 a_short = self.db.tile_a_names[tile_type // 4][:3]
                 b_short = self.db.tile_b_names[tile_type % 4][:3]
                 attr_str = f"{a_short}+{b_short}"
-                attr_txt = self.font_tiny.render(attr_str, True, (255, 255, 200))
-                screen.blit(attr_txt,
-                    (x0 + pad + (tile_px - attr_txt.get_width()) // 2,
-                     y0 + pad + tile_px - int(15 * s)))
+                attr_measure = self.font_tile.render(attr_str, True, BLACK)
+                ax = x0 + pad + (tile_px - attr_measure.get_width()) // 2
+                ay = y0 + pad + tile_px - attr_measure.get_height() - 3
+                self._draw_glow_text(screen, self.font_tile, attr_str,
+                                     ax, ay)
 
             # Move quality circle — win percentage for current mover
             if not claimed and pos in self._cached_win_rates:
@@ -441,7 +458,7 @@ class OkiyaGUI:
 
         # Turn
         if game_over:
-            turn_txt = self.font_med.render(game_over, True, GOLD)
+            turn_txt = self.font_med.render(game_over, True, BROWN)
             screen.blit(turn_txt, (px, py))
         else:
             turn_str = "P0 (Red)" if self.game.is_p0_turn else "P1 (Blue)"
@@ -554,7 +571,7 @@ class OkiyaGUI:
         if self.status_msg and pygame.time.get_ticks() < self.status_timer:
             py = board_px - int(25 * s)
             screen.blit(self.font_sm.render(
-                self.status_msg, True, GOLD), (px, py))
+                self.status_msg, True, BROWN), (px, py))
 
     def _draw_bar(self):
         board_px = self.board_px
@@ -579,7 +596,7 @@ class OkiyaGUI:
         # Solving indicator
         if self.solving:
             dots = "." * ((pygame.time.get_ticks() // 500) % 4)
-            stxt = self.font_btn.render(f"Solving{dots}", True, GOLD)
+            stxt = self.font_btn.render(f"Solving{dots}", True, BROWN)
             sx = self.btn_solve.rect.right + 10
             sy = self.btn_solve.rect.centery - stxt.get_height() // 2
             self.screen.blit(stxt, (sx, sy))

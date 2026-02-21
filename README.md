@@ -9,10 +9,10 @@ Enumerates every reachable game state (~9.8 million), computes the minimax-optim
 
 - Python 3.8+
 - NVIDIA GPU with CUDA support
-- `pycuda`, `numpy`, `Pillow`
+- `pycuda`, `numpy`, `Pillow`, `pygame`
 
 ```
-pip install pycuda numpy Pillow
+pip install pycuda numpy Pillow pygame
 ```
 
 ## Files
@@ -20,8 +20,10 @@ pip install pycuda numpy Pillow
 | File | Description |
 |---|---|
 | `board.json` | Board layout — tile placement on the 4×4 grid |
+| `okiya_core.py` | Shared game logic: `SolutionDB`, `GameState`, pure helpers |
 | `okiya_solve.py` | GPU solver: forward BFS + backward minimax |
-| `okiya_query.py` | Query interface: lookup any state, show best moves |
+| `okiya_query.py` | CLI query interface: lookup any state, show best moves |
+| `okiya_gui.py` | Pygame GUI: interactive play with move visualization |
 | `images/` | Tile artwork (16 tiles + 2 player markers) |
 | `solution/` | Solver output (generated, git-ignored) |
 
@@ -30,28 +32,43 @@ pip install pycuda numpy Pillow
 **1. Solve the game:**
 
 ```bash
-python okiya_solve.py
+python3 okiya_solve.py
 ```
 
 Reads `board.json`, solves all ~9.8M states in ~20 seconds (RTX 4090), writes results to `solution/`.
 
-**2. Query a position:**
+**2. Play in the GUI:**
+
+```bash
+python3 okiya_gui.py
+```
+
+Opens a resizable Pygame window with the 4×4 board. Click tiles to play moves. Features:
+
+- Move quality overlays — win probability (%) under uniform random play, color-coded green (favorable) / red (unfavorable)
+- Undo / Redo / Reset — buttons or `Ctrl+Z` / `Ctrl+Y` / `Ctrl+R`
+- **Shuffle** — randomize the tile layout (clears current solution)
+- **Solve** — run the GPU solver in the background (~20s), solution loads automatically
+- Win and stuck detection with game-over display
+- Works without a solution (no move recommendations, but play is still possible)
+
+**3. Query a position (CLI):**
 
 ```bash
 # Initial position — show all moves
-python okiya_query.py --state "0,0,16"
+python3 okiya_query.py --state "0,0,16"
 
 # With board image
-python okiya_query.py --state "0,0,16" --image
+python3 okiya_query.py --state "0,0,16" --image
 
 # Interactive mode
-python okiya_query.py
+python3 okiya_query.py
 
 # Limit to top 3 moves
-python okiya_query.py --top-n 3
+python3 okiya_query.py --top-n 3
 ```
 
-**3. Interactive mode commands:**
+**4. Interactive CLI commands:**
 
 | Command | Action |
 |---|---|
@@ -86,7 +103,7 @@ To solve a different tile arrangement, edit `tiles` in `board.json` and re-run t
 ## Game Rules
 
 - 4×4 board with 16 unique tiles, each having 2 attributes (4 plants × 4 weather)
-- Two players (P0=Red, P1=Black) alternate turns; P0 goes first
+- Two players (P0=Red, P1=Blue) alternate turns; P0 goes first
 - **Turn 0:** Must pick from the 12 border positions (not the 4 center squares)
 - **Later turns:** Must pick an unclaimed tile that is *related* to the last-played tile
 - **Win:** Claim any 4 in a row, 4 in a column, or 2×2 square (17 patterns total)
