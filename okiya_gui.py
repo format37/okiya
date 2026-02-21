@@ -15,15 +15,11 @@ IMAGES_DIR = os.path.join(SCRIPT_DIR, 'images')
 BOARD_PATH = os.path.join(SCRIPT_DIR, 'board.json')
 FONT_PATH  = "/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf"
 
-# Layout
-CELL       = 125
-TILE_PX    = 115
-PAD        = (CELL - TILE_PX) // 2
-BOARD_PX   = CELL * 4  # 500
-PANEL_W    = 280
-BAR_H      = 50
-WIN_W      = BOARD_PX + PANEL_W
-WIN_H      = BOARD_PX + BAR_H
+# Reference layout (scale=1.0 at CELL=125)
+DEFAULT_CELL    = 125
+DEFAULT_PANEL_W = 280
+BAR_H           = 50
+MIN_PANEL_W     = 180
 
 # Colors
 BG_COLOR      = (235, 230, 215)
@@ -49,18 +45,27 @@ BLACK         = (0, 0, 0)
 
 
 class TileRenderer:
-    """Loads hi-res tile images and draws cells."""
+    """Loads hi-res tile images and draws cells with rescaling support."""
 
     def __init__(self):
-        self._tiles = {}
+        self._originals = {}
         for tile_type in range(16):
             # Images are indexed as weather*4+plant,
             # tile types are plant*4+weather
             img_idx = (tile_type % 4) * 4 + (tile_type // 4)
             path = os.path.join(IMAGES_DIR, f'higardentile{img_idx}.png')
-            img = pygame.image.load(path).convert_alpha()
+            self._originals[tile_type] = pygame.image.load(path).convert_alpha()
+        self._tiles = {}
+        self._tile_px = 0
+
+    def rescale(self, tile_px):
+        if tile_px == self._tile_px:
+            return
+        self._tile_px = tile_px
+        self._tiles = {}
+        for tile_type, img in self._originals.items():
             self._tiles[tile_type] = pygame.transform.smoothscale(
-                img, (TILE_PX, TILE_PX))
+                img, (tile_px, tile_px))
 
     def get_tile(self, tile_type):
         return self._tiles[tile_type]
@@ -69,11 +74,11 @@ class TileRenderer:
 class Button:
     """Simple clickable button."""
 
-    def __init__(self, rect, text, callback, font):
-        self.rect = pygame.Rect(rect)
+    def __init__(self, text, callback):
+        self.rect = pygame.Rect(0, 0, 0, 0)
         self.text = text
         self.callback = callback
-        self.font = font
+        self.font = None
         self.enabled = True
 
     def draw(self, surface, mx, my):
@@ -106,17 +111,14 @@ class OkiyaGUI:
 
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((WIN_W, WIN_H))
+
+        # Initial window size
+        init_w = DEFAULT_CELL * 4 + DEFAULT_PANEL_W  # 780
+        init_h = DEFAULT_CELL * 4 + BAR_H            # 550
+        self.screen = pygame.display.set_mode(
+            (init_w, init_h), pygame.RESIZABLE)
         pygame.display.set_caption("Okiya")
         self.clock = pygame.time.Clock()
-
-        # Fonts
-        self.font_big   = pygame.font.Font(FONT_PATH, 20)
-        self.font_med   = pygame.font.Font(FONT_PATH, 16)
-        self.font_sm    = pygame.font.Font(FONT_PATH, 13)
-        self.font_tiny  = pygame.font.Font(FONT_PATH, 11)
-        self.font_btn   = pygame.font.Font(FONT_PATH, 14)
-        self.font_player = pygame.font.Font(FONT_PATH, 40)
 
         # Core
         self.db = SolutionDB()
@@ -130,38 +132,17 @@ class OkiyaGUI:
         self.status_msg = ""
         self.status_timer = 0
 
-        # Pre-render semi-transparent overlays
-        self._p0_overlay = pygame.Surface((TILE_PX, TILE_PX), pygame.SRCALPHA)
-        self._p0_overlay.fill(P0_OVERLAY)
-        self._p1_overlay = pygame.Surface((TILE_PX, TILE_PX), pygame.SRCALPHA)
-        self._p1_overlay.fill(P1_OVERLAY)
-        self._valid_overlay = pygame.Surface((TILE_PX, TILE_PX), pygame.SRCALPHA)
-        self._valid_overlay.fill(VALID_HIGHLIGHT)
-
-        # Buttons
-        bx = 10
-        by = BOARD_PX + 10
-        bw, bh = 72, 30
-        gap = 6
-        self.btn_undo = Button(
-            (bx, by, bw, bh), "Undo", self._on_undo, self.font_btn)
-        bx += bw + gap
-        self.btn_redo = Button(
-            (bx, by, bw, bh), "Redo", self._on_redo, self.font_btn)
-        bx += bw + gap
-        self.btn_reset = Button(
-            (bx, by, bw, bh), "Reset", self._on_reset, self.font_btn)
-
-        # Right side buttons
-        bx2 = BOARD_PX + 20
-        self.btn_shuffle = Button(
-            (bx2, by, bw + 10, bh), "Shuffle", self._on_shuffle, self.font_btn)
-        bx2 += bw + 10 + gap
-        self.btn_solve = Button(
-            (bx2, by, bw, bh), "Solve", self._on_solve, self.font_btn)
-
+        # Buttons (positions set by _recompute_layout)
+        self.btn_undo = Button("Undo", self._on_undo)
+        self.btn_redo = Button("Redo", self._on_redo)
+        self.btn_reset = Button("Reset", self._on_reset)
+        self.btn_shuffle = Button("Shuffle", self._on_shuffle)
+        self.btn_solve = Button("Solve", self._on_solve)
         self.buttons = [self.btn_undo, self.btn_redo, self.btn_reset,
                         self.btn_shuffle, self.btn_solve]
+
+        # Compute layout (sets all metrics, fonts, overlays, button rects)
+        self._recompute_layout(init_w, init_h)
 
         # Cached move data for current state
         self._cached_value = None
@@ -170,6 +151,71 @@ class OkiyaGUI:
         self._cached_win_rates = {}
         self._cached_state_key = None
         self._update_cache()
+
+    # -- Layout --
+
+    def _recompute_layout(self, win_w, win_h):
+        """Recompute all layout metrics from window dimensions."""
+        self.win_w = win_w
+        self.win_h = win_h
+
+        # Board is square; limited by height and width minus panel
+        board_max_h = win_h - BAR_H
+        board_max_w = win_w - MIN_PANEL_W
+        board_side = max(min(board_max_h, board_max_w), 160)
+
+        self.cell = board_side // 4
+        self.board_px = self.cell * 4
+        self.tile_px = max(self.cell - 10, 20)
+        self.pad = (self.cell - self.tile_px) // 2
+        self.panel_w = win_w - self.board_px
+        self.scale = self.cell / DEFAULT_CELL
+
+        # Fonts (scaled, with minimum sizes)
+        def sz(base):
+            return max(6, int(base * self.scale))
+
+        self.font_big    = pygame.font.Font(FONT_PATH, sz(20))
+        self.font_med    = pygame.font.Font(FONT_PATH, sz(16))
+        self.font_sm     = pygame.font.Font(FONT_PATH, sz(13))
+        self.font_tiny   = pygame.font.Font(FONT_PATH, sz(11))
+        self.font_btn    = pygame.font.Font(FONT_PATH, sz(14))
+        self.font_player = pygame.font.Font(FONT_PATH, sz(40))
+
+        # Tile images
+        self.tiles.rescale(self.tile_px)
+
+        # Overlays
+        self._p0_overlay = pygame.Surface(
+            (self.tile_px, self.tile_px), pygame.SRCALPHA)
+        self._p0_overlay.fill(P0_OVERLAY)
+        self._p1_overlay = pygame.Surface(
+            (self.tile_px, self.tile_px), pygame.SRCALPHA)
+        self._p1_overlay.fill(P1_OVERLAY)
+        self._valid_overlay = pygame.Surface(
+            (self.tile_px, self.tile_px), pygame.SRCALPHA)
+        self._valid_overlay.fill(VALID_HIGHLIGHT)
+
+        # Button positions
+        bw = max(50, int(72 * self.scale))
+        bh = max(22, int(30 * self.scale))
+        gap = max(4, int(6 * self.scale))
+        by = self.board_px + (BAR_H - bh) // 2
+
+        bx = 10
+        for btn in [self.btn_undo, self.btn_redo, self.btn_reset]:
+            btn.rect = pygame.Rect(bx, by, bw, bh)
+            btn.font = self.font_btn
+            bx += bw + gap
+
+        bx2 = self.board_px + 20
+        self.btn_shuffle.rect = pygame.Rect(bx2, by, bw + 10, bh)
+        self.btn_shuffle.font = self.font_btn
+        bx2 += bw + 10 + gap
+        self.btn_solve.rect = pygame.Rect(bx2, by, bw, bh)
+        self.btn_solve.font = self.font_btn
+
+    # -- State cache --
 
     def _state_key(self):
         return (self.game.mask_p0, self.game.mask_p1, self.game.last_pos)
@@ -245,7 +291,7 @@ class OkiyaGUI:
         self.game.reset()
         self._cached_state_key = None
         self._update_cache()
-        self._set_status("Shuffled. No solution — press Solve.")
+        self._set_status("Shuffled. No solution \u2014 press Solve.")
 
     def _on_solve(self):
         if self.solving:
@@ -275,6 +321,12 @@ class OkiyaGUI:
         init_tiles = self.db.init_tiles
         game_over = self._game_over_reason()
 
+        cell = self.cell
+        tile_px = self.tile_px
+        pad = self.pad
+        board_px = self.board_px
+        s = self.scale
+
         # Build move map
         move_map = {}
         if self._cached_moves and not game_over:
@@ -284,11 +336,11 @@ class OkiyaGUI:
         for pos in range(16):
             row, col = pos // 4, pos % 4
             tile_type = int(init_tiles[pos])
-            x0 = col * CELL
-            y0 = row * CELL
+            x0 = col * cell
+            y0 = row * cell
 
             # Tile image
-            screen.blit(self.tiles.get_tile(tile_type), (x0 + PAD, y0 + PAD))
+            screen.blit(self.tiles.get_tile(tile_type), (x0 + pad, y0 + pad))
 
             is_p0 = bool(m0 & (1 << pos))
             is_p1 = bool(m1 & (1 << pos))
@@ -298,38 +350,39 @@ class OkiyaGUI:
             # Player color overlay
             if claimed:
                 ov = self._p0_overlay if is_p0 else self._p1_overlay
-                screen.blit(ov, (x0 + PAD, y0 + PAD))
+                screen.blit(ov, (x0 + pad, y0 + pad))
 
                 # Player letter
                 letter = 'R' if is_p0 else 'B'
-                cx, cy = x0 + CELL // 2, y0 + CELL // 2
+                cx, cy = x0 + cell // 2, y0 + cell // 2
                 # Shadow
                 shadow = self.font_player.render(letter, True, (0, 0, 0))
-                screen.blit(shadow, (cx - shadow.get_width()//2 + 2,
-                                     cy - shadow.get_height()//2 + 2))
+                soff = max(1, int(2 * s))
+                screen.blit(shadow, (cx - shadow.get_width() // 2 + soff,
+                                     cy - shadow.get_height() // 2 + soff))
                 txt = self.font_player.render(letter, True, WHITE)
-                screen.blit(txt, (cx - txt.get_width()//2,
-                                  cy - txt.get_height()//2))
+                screen.blit(txt, (cx - txt.get_width() // 2,
+                                  cy - txt.get_height() // 2))
 
             # Valid move highlight
             if not claimed and not game_over and pos in self._cached_valid:
-                screen.blit(self._valid_overlay, (x0 + PAD, y0 + PAD))
+                screen.blit(self._valid_overlay, (x0 + pad, y0 + pad))
 
             # Gold border on last move
             if is_last:
                 for i in range(3):
                     pygame.draw.rect(screen, GOLD,
-                        (x0 + PAD - i - 1, y0 + PAD - i - 1,
-                         TILE_PX + 2*(i+1), TILE_PX + 2*(i+1)), 1)
+                        (x0 + pad - i - 1, y0 + pad - i - 1,
+                         tile_px + 2 * (i + 1), tile_px + 2 * (i + 1)), 1)
 
             # Position number (top-left)
             pos_txt = self.font_tiny.render(str(pos), True, (255, 255, 60))
-            screen.blit(pos_txt, (x0 + PAD + 3, y0 + PAD + 1))
+            screen.blit(pos_txt, (x0 + pad + 3, y0 + pad + 1))
 
             # Tile type id (top-right)
             tid = self.font_tiny.render(f"t{tile_type}", True, (255, 255, 60))
-            screen.blit(tid, (x0 + PAD + TILE_PX - tid.get_width() - 3,
-                              y0 + PAD + 1))
+            screen.blit(tid, (x0 + pad + tile_px - tid.get_width() - 3,
+                              y0 + pad + 1))
 
             # Tile attributes (bottom, unclaimed only)
             if not claimed:
@@ -338,15 +391,15 @@ class OkiyaGUI:
                 attr_str = f"{a_short}+{b_short}"
                 attr_txt = self.font_tiny.render(attr_str, True, (255, 255, 200))
                 screen.blit(attr_txt,
-                    (x0 + PAD + (TILE_PX - attr_txt.get_width()) // 2,
-                     y0 + PAD + TILE_PX - 15))
+                    (x0 + pad + (tile_px - attr_txt.get_width()) // 2,
+                     y0 + pad + tile_px - int(15 * s)))
 
             # Move quality circle — win percentage for current mover
             if not claimed and pos in self._cached_win_rates:
                 rate = self._cached_win_rates[pos]
                 pct = int(round(rate * 100))
-                cx, cy = x0 + CELL // 2, y0 + CELL // 2
-                r = 19
+                cx, cy = x0 + cell // 2, y0 + cell // 2
+                r = max(8, int(19 * s))
                 # Color: green if >55%, red if <45%, gray between
                 if rate > 0.55:
                     fill_c = GREEN_MOVE
@@ -358,46 +411,52 @@ class OkiyaGUI:
                 pygame.draw.circle(screen, fill_c, (cx, cy), r)
                 pygame.draw.circle(screen, WHITE, (cx, cy), r, 2)
                 ltxt = self.font_tiny.render(label, True, WHITE)
-                screen.blit(ltxt, (cx - ltxt.get_width()//2,
-                                   cy - ltxt.get_height()//2))
+                screen.blit(ltxt, (cx - ltxt.get_width() // 2,
+                                   cy - ltxt.get_height() // 2))
 
         # Grid lines
         for i in range(5):
             pygame.draw.line(screen, GRID_COLOR,
-                (i * CELL, 0), (i * CELL, BOARD_PX), 2)
+                (i * cell, 0), (i * cell, board_px), 2)
             pygame.draw.line(screen, GRID_COLOR,
-                (0, i * CELL), (BOARD_PX, i * CELL), 2)
+                (0, i * cell), (board_px, i * cell), 2)
 
     def _draw_panel(self):
         screen = self.screen
-        px = BOARD_PX + 10
-        py = 15
+        board_px = self.board_px
+        panel_w = self.panel_w
+        s = self.scale
+        px = board_px + int(10 * s)
+        py = int(15 * s)
 
         # Panel background
         pygame.draw.rect(screen, PANEL_BG,
-            (BOARD_PX, 0, PANEL_W, BOARD_PX))
+            (board_px, 0, panel_w, board_px))
         pygame.draw.line(screen, GRID_COLOR,
-            (BOARD_PX, 0), (BOARD_PX, BOARD_PX), 2)
+            (board_px, 0), (board_px, board_px), 2)
 
         game_over = self._game_over_reason()
+        line_h = int(30 * s)
+        line_sm = int(22 * s)
 
         # Turn
         if game_over:
             turn_txt = self.font_med.render(game_over, True, GOLD)
+            screen.blit(turn_txt, (px, py))
         else:
             turn_str = "P0 (Red)" if self.game.is_p0_turn else "P1 (Blue)"
             turn_color = P0_COLOR if self.game.is_p0_turn else P1_COLOR
             label = self.font_med.render("Turn: ", True, TEXT_COLOR)
             screen.blit(label, (px, py))
             turn_txt = self.font_med.render(turn_str, True, turn_color)
-        screen.blit(turn_txt, (px + (0 if game_over else label.get_width()), py))
-        py += 30
+            screen.blit(turn_txt, (px + label.get_width(), py))
+        py += line_h
 
         # Level
         level_txt = self.font_med.render(
             f"Level: {self.game.level}", True, TEXT_COLOR)
         screen.blit(level_txt, (px, py))
-        py += 30
+        py += line_h
 
         # Value (relative to current mover)
         has_sol = self.db.has_solution
@@ -422,7 +481,7 @@ class OkiyaGUI:
         elif not has_sol:
             screen.blit(self.font_sm.render(
                 "No solution", True, MUTED_COLOR), (px, py))
-        py += 30
+        py += line_h
 
         # Last pos
         lp = self.game.last_pos
@@ -435,36 +494,42 @@ class OkiyaGUI:
         screen.blit(lp_label, (px, py))
         lp_txt = self.font_med.render(lp_str, True, TEXT_COLOR)
         screen.blit(lp_txt, (px + lp_label.get_width(), py))
-        py += 25
+        py += int(25 * s)
 
         # State masks (for debugging / verification)
         m0, m1 = self.game.mask_p0, self.game.mask_p1
         state_str = f"R:{m0:#06x} B:{m1:#06x}"
         screen.blit(self.font_tiny.render(
             state_str, True, MUTED_COLOR), (px, py))
-        py += 22
+        py += line_sm
 
         # Move legend
         if not game_over and self._cached_win_rates:
             mover = "Red" if self.game.is_p0_turn else "Blue"
             screen.blit(self.font_sm.render(
                 f"Win % for {mover}:", True, TEXT_COLOR), (px, py))
-            py += 22
-            pygame.draw.circle(screen, GREEN_MOVE, (px + 10, py + 7), 8)
+            py += line_sm
+            cr = max(4, int(8 * s))
+            pygame.draw.circle(screen, GREEN_MOVE,
+                (px + cr + 2, py + cr), cr)
             screen.blit(self.font_sm.render(
-                ">55%  favorable", True, GREEN_MOVE), (px + 24, py))
-            py += 22
-            pygame.draw.circle(screen, RED_MOVE, (px + 10, py + 7), 8)
+                ">55%  favorable", True, GREEN_MOVE),
+                (px + cr * 2 + 8, py))
+            py += line_sm
+            pygame.draw.circle(screen, RED_MOVE,
+                (px + cr + 2, py + cr), cr)
             screen.blit(self.font_sm.render(
-                "<45%  unfavorable", True, RED_MOVE), (px + 24, py))
-            py += 30
+                "<45%  unfavorable", True, RED_MOVE),
+                (px + cr * 2 + 8, py))
+            py += line_h
 
         # Moves list sorted by win rate
         if not game_over and self._cached_win_rates:
-            py += 5
+            py += int(5 * s)
             screen.blit(self.font_sm.render(
                 "Moves (best %):", True, TEXT_COLOR), (px, py))
-            py += 20
+            py += int(20 * s)
+            line_entry = int(16 * s)
             # Sort moves by win rate descending
             sorted_moves = sorted(
                 self._cached_win_rates.items(),
@@ -481,27 +546,27 @@ class OkiyaGUI:
                     color = MUTED_COLOR
                 line = f"p{pos}({r},{c}) t{tile} {pct}%"
                 screen.blit(self.font_tiny.render(line, True, color), (px, py))
-                py += 16
-                if py > BOARD_PX - 20:
+                py += line_entry
+                if py > board_px - int(20 * s):
                     break
 
         # Status message
         if self.status_msg and pygame.time.get_ticks() < self.status_timer:
-            py = BOARD_PX - 25
+            py = board_px - int(25 * s)
             screen.blit(self.font_sm.render(
                 self.status_msg, True, GOLD), (px, py))
 
     def _draw_bar(self):
+        board_px = self.board_px
         # Button bar background
         pygame.draw.rect(self.screen, BG_COLOR,
-            (0, BOARD_PX, WIN_W, BAR_H))
+            (0, board_px, self.win_w, BAR_H))
         pygame.draw.line(self.screen, GRID_COLOR,
-            (0, BOARD_PX), (WIN_W, BOARD_PX), 2)
+            (0, board_px), (self.win_w, board_px), 2)
 
         mx, my = pygame.mouse.get_pos()
 
         # Update button enabled states
-        game_over = self._game_over_reason()
         self.btn_undo.enabled = self.game.can_undo() and not self.solving
         self.btn_redo.enabled = self.game.can_redo() and not self.solving
         self.btn_reset.enabled = (self.game.level > 0) and not self.solving
@@ -515,20 +580,24 @@ class OkiyaGUI:
         if self.solving:
             dots = "." * ((pygame.time.get_ticks() // 500) % 4)
             stxt = self.font_btn.render(f"Solving{dots}", True, GOLD)
-            self.screen.blit(stxt, (BOARD_PX + 180, BOARD_PX + 17))
+            sx = self.btn_solve.rect.right + 10
+            sy = self.btn_solve.rect.centery - stxt.get_height() // 2
+            self.screen.blit(stxt, (sx, sy))
 
     def _handle_board_click(self, mx, my):
         if self.solving:
             return
-        if mx >= BOARD_PX or my >= BOARD_PX:
+        if mx >= self.board_px or my >= self.board_px:
             return
         game_over = self._game_over_reason()
         if game_over:
             return
 
-        col = mx // CELL
-        row = my // CELL
+        col = mx // self.cell
+        row = my // self.cell
         pos = row * 4 + col
+        if pos > 15:
+            return
 
         if pos in self._cached_valid:
             self.game.play_move(pos)
@@ -542,7 +611,8 @@ class OkiyaGUI:
                 self._reload_pending = False
                 self.solving = False
                 if self._solve_error:
-                    self._set_status(f"Solve error: {self._solve_error[:60]}", 8000)
+                    self._set_status(
+                        f"Solve error: {self._solve_error[:60]}", 8000)
                 else:
                     self.db.reload()
                     self._cached_state_key = None
@@ -552,6 +622,14 @@ class OkiyaGUI:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.VIDEORESIZE:
+                    w, h = event.w, event.h
+                    # Enforce minimum size
+                    w = max(w, 520)
+                    h = max(h, 350)
+                    self.screen = pygame.display.set_mode(
+                        (w, h), pygame.RESIZABLE)
+                    self._recompute_layout(w, h)
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     mx, my = event.pos
                     # Check buttons first
