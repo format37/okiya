@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 images/board*.png
 images/tiles.png
+examples/

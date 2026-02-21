@@ -9,121 +9,33 @@ Usage:
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-import json
 import os
-import sys
 import argparse
 
-SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
-SOLUTION_DIR = os.path.join(SCRIPT_DIR, 'solution')
+from okiya_core import (SolutionDB, popcount, encode_state, decode_state,
+                         value_label)
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------------------------------------------------------------------
-# Constants (loaded from solution metadata)
+# Shared solution database
 # ---------------------------------------------------------------------------
 
-def _load_metadata():
-    path = os.path.join(SOLUTION_DIR, 'metadata.json')
-    with open(path) as f:
-        return json.load(f)
+_db = SolutionDB()
 
-META = _load_metadata()
-INIT_TILES         = np.array(META['init_tiles'], dtype=np.int32)
-WIN_PATTERNS       = np.array(META['win_patterns'], dtype=np.uint32)
-BORDER_MASK        = np.uint32(META['border_mask'])
-POS_RELATION_MASKS = np.array(META['pos_relation_masks'], dtype=np.uint32)
-
-_attrs = META.get('attributes', {})
-TILE_A_NAMES = _attrs.get('a', ['Maple', 'Cherry', 'Pine', 'Iris'])
-TILE_B_NAMES = _attrs.get('b', ['Sun', 'Tanzaku', 'Bird', 'Rain'])
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def popcount(x):
-    return bin(int(x)).count('1')
-
-
-def encode_state(mask_p0, mask_p1, last_pos):
-    return np.uint64((int(mask_p0) << 21) | (int(mask_p1) << 5) | int(last_pos))
-
-
-def decode_state(state):
-    s = int(state)
-    return (s >> 21) & 0xFFFF, (s >> 5) & 0xFFFF, s & 0x1F
+# Backward-compatible aliases
+INIT_TILES         = _db.init_tiles
+POS_RELATION_MASKS = _db.pos_relation_masks
+TILE_A_NAMES       = _db.tile_a_names
+TILE_B_NAMES       = _db.tile_b_names
 
 
 def tile_name(tile_type):
-    a, b = tile_type // 4, tile_type % 4
-    return f"{TILE_A_NAMES[a]}+{TILE_B_NAMES[b]}"
+    return _db.tile_name(tile_type)
 
-
-def value_label(v):
-    if v == 1:  return 'P0 wins'
-    if v == -1: return 'P1 wins'
-    return 'Draw'
-
-# ---------------------------------------------------------------------------
-# Level data cache
-# ---------------------------------------------------------------------------
-
-_cache = {}
-
-def load_level(level):
-    if level not in _cache:
-        path = os.path.join(SOLUTION_DIR, f'level_{level:02d}.npz')
-        if not os.path.exists(path):
-            return None
-        _cache[level] = np.load(path)
-    return _cache[level]
-
-# ---------------------------------------------------------------------------
-# Core lookup
-# ---------------------------------------------------------------------------
 
 def lookup(mask_p0, mask_p1, last_pos, top_n=None):
-    """Look up a state and return (value, moves_list).
-
-    Each move is (position, child_value).
-    """
-    level = popcount(mask_p0) + popcount(mask_p1)
-    state = encode_state(mask_p0, mask_p1, last_pos)
-
-    data = load_level(level)
-    if data is None:
-        return None, []
-
-    states = data['states']
-    idx = int(np.searchsorted(states, state))
-    if idx >= len(states) or states[idx] != state:
-        return None, []
-
-    value = int(data['values'][idx])
-
-    moves = []
-    if 'children_offsets' in data and 'children_indices' in data:
-        offsets = data['children_offsets']
-        indices = data['children_indices']
-        start, end = int(offsets[idx]), int(offsets[idx + 1])
-
-        if start < end:
-            nxt = load_level(level + 1)
-            if nxt is not None:
-                child_idxs = indices[start:end]
-                for ci in child_idxs:
-                    cs  = nxt['states'][ci]
-                    cv  = int(nxt['values'][ci])
-                    _, _, clp = decode_state(cs)
-                    moves.append((clp, cv))
-
-    # sort: best moves first (highest value if P0's turn, lowest if P1's)
-    is_p0_turn = (level % 2 == 0)
-    moves.sort(key=lambda m: m[1], reverse=is_p0_turn)
-
-    if top_n is not None and top_n > 0:
-        moves = moves[:top_n]
-
-    return value, moves
+    return _db.lookup(mask_p0, mask_p1, last_pos, top_n=top_n)
 
 # ---------------------------------------------------------------------------
 # Board image renderer
