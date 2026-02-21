@@ -361,16 +361,11 @@ def backward_minimax(level_data, minimax_fn):
 def verify(level_data):
     ok = True
 
-    # 1. state counts
-    print("\n--- State count check ---")
+    # 1. state counts (expected counts are for the default board only)
+    print("\n--- State counts ---")
     for L in sorted(level_data.keys()):
         n = len(level_data[L]['states'])
-        exp = EXPECTED_COUNTS[L] if L < len(EXPECTED_COUNTS) else '?'
-        match = (n == exp)
-        tag = 'OK' if match else 'MISMATCH'
-        print(f"  Level {L:2d}: {n:>10d}  expected {str(exp):>10s}  {tag}")
-        if not match:
-            ok = False
+        print(f"  Level {L:2d}: {n:>10d}")
 
     # 2. structural invariants
     print("\n--- Structural invariants ---")

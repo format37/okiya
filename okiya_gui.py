@@ -257,9 +257,9 @@ class OkiyaGUI:
         try:
             result = subprocess.run(
                 ['python3', os.path.join(SCRIPT_DIR, 'okiya_solve.py')],
-                capture_output=True, text=True, timeout=300)
+                timeout=300)
             if result.returncode != 0:
-                self._solve_error = result.stderr[-200:] if result.stderr else "Unknown error"
+                self._solve_error = f"Solver exited with code {result.returncode}"
         except Exception as e:
             self._solve_error = str(e)
         self._reload_pending = True
