@@ -238,11 +238,11 @@ class OkiyaGUI:
         random.shuffle(board['tiles'])
         with open(BOARD_PATH, 'w') as f:
             json.dump(board, f, indent=2)
-        self.db.load_board()
+        self.db.load_board()  # updates tiles + deletes solution
         self.game.reset()
         self._cached_state_key = None
         self._update_cache()
-        self._set_status("Board shuffled. Press Solve to compute.")
+        self._set_status("Shuffled. No solution — press Solve.")
 
     def _on_solve(self):
         if self.solving:
@@ -397,7 +397,8 @@ class OkiyaGUI:
         py += 30
 
         # Value (relative to current mover)
-        if self._cached_value is not None:
+        has_sol = self.db.has_solution
+        if has_sol and self._cached_value is not None:
             val = self._cached_value
             p0t = self.game.is_p0_turn
             mover_wins = (val == 1 and p0t) or (val == -1 and not p0t)
@@ -411,13 +412,13 @@ class OkiyaGUI:
             else:
                 vstr = "Draw"
                 vcolor = MUTED_COLOR
-        else:
-            vstr = "?"
-            vcolor = MUTED_COLOR
-        vlbl = self.font_med.render("Value: ", True, TEXT_COLOR)
-        screen.blit(vlbl, (px, py))
-        val_txt = self.font_med.render(vstr, True, vcolor)
-        screen.blit(val_txt, (px + vlbl.get_width(), py))
+            vlbl = self.font_med.render("Value: ", True, TEXT_COLOR)
+            screen.blit(vlbl, (px, py))
+            val_txt = self.font_med.render(vstr, True, vcolor)
+            screen.blit(val_txt, (px + vlbl.get_width(), py))
+        elif not has_sol:
+            screen.blit(self.font_sm.render(
+                "No solution", True, MUTED_COLOR), (px, py))
         py += 30
 
         # Last pos
@@ -541,11 +542,9 @@ class OkiyaGUI:
                     self._set_status(f"Solve error: {self._solve_error[:60]}", 8000)
                 else:
                     self.db.reload()
-                    self.game.reset()
-                    self.tiles = TileRenderer()  # tiles may have changed
                     self._cached_state_key = None
                     self._update_cache()
-                    self._set_status("Solution loaded! Game reset.", 5000)
+                    self._set_status("Solution loaded!", 5000)
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:

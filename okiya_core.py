@@ -75,32 +75,11 @@ class SolutionDB:
         self._cache = {}
         self._meta = None
         self._win_rates = None  # lazy: level -> float64 array
+        self._load_board_config()
         self._load_metadata()
 
-    def _load_metadata(self):
-        path = os.path.join(self._solution_dir, 'metadata.json')
-        with open(path) as f:
-            self._meta = json.load(f)
-        self._init_tiles = np.array(self._meta['init_tiles'], dtype=np.int32)
-        self._pos_relation_masks = np.array(
-            self._meta['pos_relation_masks'], dtype=np.uint32)
-        attrs = self._meta.get('attributes', {})
-        self._tile_a_names = attrs.get('a', ['Maple', 'Cherry', 'Pine', 'Iris'])
-        self._tile_b_names = attrs.get('b', ['Sun', 'Tanzaku', 'Bird', 'Rain'])
-
-    def reload(self):
-        """Re-read metadata and clear level cache (call after re-solve)."""
-        self._cache.clear()
-        self._win_rates = None
-        self._load_metadata()
-
-    def load_board(self):
-        """Re-read board.json, update tiles + relation masks, clear level cache.
-
-        Use after shuffling tiles (before re-solving). The solution data
-        becomes stale but the board display and valid-move logic update
-        immediately.
-        """
+    def _load_board_config(self):
+        """Load tile layout from board.json (always available)."""
         with open(self._board_path) as f:
             board = json.load(f)
         self._init_tiles = np.array(board['tiles'], dtype=np.int32)
@@ -108,8 +87,43 @@ class SolutionDB:
         attrs = board.get('attributes', {})
         self._tile_a_names = attrs.get('a', ['Maple', 'Cherry', 'Pine', 'Iris'])
         self._tile_b_names = attrs.get('b', ['Sun', 'Tanzaku', 'Bird', 'Rain'])
+
+    def _load_metadata(self):
+        """Try to load solution metadata. Sets _meta=None if absent."""
+        path = os.path.join(self._solution_dir, 'metadata.json')
+        if not os.path.exists(path):
+            self._meta = None
+            return
+        with open(path) as f:
+            self._meta = json.load(f)
+
+    @property
+    def has_solution(self):
+        return self._meta is not None
+
+    def reload(self):
+        """Re-read solution + board config and clear caches (call after solve)."""
         self._cache.clear()
         self._win_rates = None
+        self._load_board_config()
+        self._load_metadata()
+
+    def load_board(self):
+        """Re-read board.json and delete stale solution (call after shuffle)."""
+        self._load_board_config()
+        self.clear_solution()
+
+    def clear_solution(self):
+        """Delete solution files and clear all caches."""
+        import glob
+        for f in glob.glob(os.path.join(self._solution_dir, 'level_*.npz')):
+            os.remove(f)
+        meta_path = os.path.join(self._solution_dir, 'metadata.json')
+        if os.path.exists(meta_path):
+            os.remove(meta_path)
+        self._cache.clear()
+        self._win_rates = None
+        self._meta = None
 
     @property
     def meta(self):
@@ -145,6 +159,8 @@ class SolutionDB:
 
     def lookup(self, mask_p0, mask_p1, last_pos, top_n=None):
         """Look up a state and return (value, [(pos, child_value), ...])."""
+        if not self.has_solution:
+            return None, []
         level = popcount(mask_p0) + popcount(mask_p1)
         state = encode_state(mask_p0, mask_p1, last_pos)
 
@@ -213,6 +229,8 @@ class SolutionDB:
         """Lazily compute P0 win probability for every state, bottom-up."""
         if self._win_rates is not None:
             return
+        if not self.has_solution:
+            return
         # find max level
         max_level = 0
         for L in range(17):
@@ -261,7 +279,11 @@ class SolutionDB:
 
         Win rate = probability of winning under uniform random play.
         """
+        if not self.has_solution:
+            return {}
         self._ensure_win_rates()
+        if self._win_rates is None:
+            return {}
         level = popcount(mask_p0) + popcount(mask_p1)
         is_p0_turn = (level % 2 == 0)
         state = encode_state(mask_p0, mask_p1, last_pos)
