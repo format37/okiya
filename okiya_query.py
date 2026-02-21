@@ -54,7 +54,9 @@ LEGEND_H = 80         # space below the board for legend text
 
 
 def _load_tile_image(tile_type):
-    path = os.path.join(IMAGES_DIR, f'lowgardentile{tile_type}.png')
+    # Images are indexed as weather*4+plant, tile types are plant*4+weather
+    img_idx = (tile_type % 4) * 4 + (tile_type // 4)
+    path = os.path.join(IMAGES_DIR, f'lowgardentile{img_idx}.png')
     return Image.open(path).convert('RGBA').resize(
         (TILE, TILE), Image.LANCZOS)
 

@@ -53,10 +53,13 @@ class TileRenderer:
 
     def __init__(self):
         self._tiles = {}
-        for i in range(16):
-            path = os.path.join(IMAGES_DIR, f'higardentile{i}.png')
+        for tile_type in range(16):
+            # Images are indexed as weather*4+plant,
+            # tile types are plant*4+weather
+            img_idx = (tile_type % 4) * 4 + (tile_type // 4)
+            path = os.path.join(IMAGES_DIR, f'higardentile{img_idx}.png')
             img = pygame.image.load(path).convert_alpha()
-            self._tiles[i] = pygame.transform.smoothscale(
+            self._tiles[tile_type] = pygame.transform.smoothscale(
                 img, (TILE_PX, TILE_PX))
 
     def get_tile(self, tile_type):
