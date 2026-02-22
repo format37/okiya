@@ -19,6 +19,7 @@ BOARD_PATH   = os.path.join(SCRIPT_DIR, 'board.json')
 WIN_PATTERNS = np.array([
     61440, 3840, 240, 15,           # rows
     34952, 17476, 8738, 4369,       # columns
+    33825, 4680,                    # diagonals (main, anti)
     52224, 26112, 13056,            # 2x2 quads (top)
     3264, 1632, 816,               # 2x2 quads (mid)
     204, 102, 51                   # 2x2 quads (bot)

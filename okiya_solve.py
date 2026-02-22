@@ -49,6 +49,7 @@ def compute_pos_relation_masks(init_tiles):
 WIN_PATTERNS = np.array([
     61440, 3840, 240, 15,           # rows
     34952, 17476, 8738, 4369,       # columns
+    33825, 4680,                    # diagonals (main, anti)
     52224, 26112, 13056,            # 2x2 quads (top)
     3264, 1632, 816,               # 2x2 quads (mid)
     204, 102, 51                   # 2x2 quads (bot)
@@ -58,16 +59,14 @@ BORDER_MASK = np.uint32(63903)  # all except positions 5,6,9,10
 
 SENTINEL = np.uint64(0xFFFFFFFFFFFFFFFF)
 
-EXPECTED_COUNTS = [1, 12, 72, 360, 1524, 6868, 24216, 90358,
-                   245279, 675467, 1252250, 2168924, 2248309,
-                   1915144, 874691, 267346, 29555]
+EXPECTED_COUNTS = None  # board-dependent; recomputed by solver
 
 # ---------------------------------------------------------------------------
 # CUDA kernel source
 # ---------------------------------------------------------------------------
 
 KERNEL_SRC = r"""
-__constant__ unsigned int c_win_patterns[17];
+__constant__ unsigned int c_win_patterns[19];
 __constant__ unsigned int c_pos_relation_masks[16];
 __constant__ unsigned int c_border_mask;
 
@@ -124,7 +123,7 @@ __global__ void expand_states(
 
     /* check if mover just won */
     unsigned int mover_mask = (mover == 0) ? new_p0 : new_p1;
-    for (int w = 0; w < 17; w++) {
+    for (int w = 0; w < 19; w++) {
         if ((mover_mask & c_win_patterns[w]) == c_win_patterns[w]) {
             child_values[tid] = (mover == 0) ? 1 : -1;
             return;

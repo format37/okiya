@@ -1,7 +1,7 @@
 # Okiya (Niya) — Complete GPU Solver
 
 Brute-force solver for the board game [Okiya (Niya)](https://boardgamegeek.com/boardgame/125311/okiya) using CUDA on an NVIDIA GPU.
-Enumerates every reachable game state (~9.8 million), computes the minimax-optimal value for each, and provides an interactive query interface to explore perfect play.
+Enumerates every reachable game state (~9.5 million), computes the minimax-optimal value for each, and provides an interactive query interface to explore perfect play.
 
 **Result for the default board:** P0 (Red) wins with perfect play. The only winning opening move is position 2 (tile Maple+Rain).
 
@@ -35,7 +35,7 @@ pip install pycuda numpy Pillow pygame
 python3 okiya_solve.py
 ```
 
-Reads `board.json`, solves all ~9.8M states in ~20 seconds (RTX 4090), writes results to `solution/`.
+Reads `board.json`, solves all ~9.5M states in ~17 seconds (RTX 4090), writes results to `solution/`.
 
 **2. Play in the GUI:**
 
@@ -106,7 +106,7 @@ To solve a different tile arrangement, edit `tiles` in `board.json` and re-run t
 - Two players (P0=Red, P1=Blue) alternate turns; P0 goes first
 - **Turn 0:** Must pick from the 12 border positions (not the 4 center squares)
 - **Later turns:** Must pick an unclaimed tile that is *related* to the last-played tile
-- **Win:** Claim any 4 in a row, 4 in a column, or 2×2 square (17 patterns total)
+- **Win:** Claim any 4 in a row, 4 in a column, 4 on a diagonal, or 2×2 square (19 patterns total)
 - **No valid moves:** The stuck player loses
 
 ## How It Works
@@ -150,9 +150,9 @@ Plus `metadata.json` with board config, game constants, and level statistics.
 
 | Metric | Value |
 |---|---|
-| Total unique states | 9,800,376 |
-| Peak level (12) | 2,248,309 states |
-| Solve time (RTX 4090) | ~20 seconds |
+| Total unique states | ~9.5M (layout-dependent) |
+| Peak level (12) | ~2.2M states |
+| Solve time (RTX 4090) | ~17 seconds |
 | Solution size on disk | ~190 MB |
 | Game outcome | P0 wins |
 | Winning first moves | 1 out of 12 |
