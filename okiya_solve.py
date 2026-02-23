@@ -177,26 +177,34 @@ __global__ void minimax_backward(
 # Compile and set up constants
 # ---------------------------------------------------------------------------
 
-def compile_kernels(pos_relation_masks):
+def compile_module():
+    """Compile CUDA + upload board-independent constants. Call once."""
     mod = SourceModule(KERNEL_SRC)
-
-    # copy constants
-    drv.memcpy_htod(mod.get_global("c_win_patterns")[0],
-                    WIN_PATTERNS)
-    drv.memcpy_htod(mod.get_global("c_pos_relation_masks")[0],
-                    pos_relation_masks)
+    drv.memcpy_htod(mod.get_global("c_win_patterns")[0], WIN_PATTERNS)
     drv.memcpy_htod(mod.get_global("c_border_mask")[0],
                     np.array([BORDER_MASK], dtype=np.uint32))
-
     expand_fn  = mod.get_function("expand_states")
     minimax_fn = mod.get_function("minimax_backward")
+    return mod, expand_fn, minimax_fn
+
+
+def upload_board_constants(mod, pos_relation_masks):
+    """Upload per-board relation masks to GPU constant memory."""
+    drv.memcpy_htod(mod.get_global("c_pos_relation_masks")[0],
+                    pos_relation_masks)
+
+
+def compile_kernels(pos_relation_masks):
+    """Backward-compatible wrapper."""
+    mod, expand_fn, minimax_fn = compile_module()
+    upload_board_constants(mod, pos_relation_masks)
     return expand_fn, minimax_fn
 
 # ---------------------------------------------------------------------------
 # Forward BFS
 # ---------------------------------------------------------------------------
 
-def forward_bfs(expand_fn, pos_relation_masks):
+def forward_bfs(expand_fn, pos_relation_masks, quiet=False):
     """Expand all reachable game states level by level.
 
     Returns dict  level -> {states, values, terminal, offsets, flat_children}
@@ -301,9 +309,10 @@ def forward_bfs(expand_fn, pos_relation_masks):
 
         term_wins = int((win_vals != 0).sum())
         term_nm   = int(nm_nonterminal.sum())
-        print(f"  Level {L+1:2d}: {n_children:>10d} states  "
-              f"({term_wins} wins, {term_nm} no-moves, "
-              f"{n_children - term_wins - term_nm} open)")
+        if not quiet:
+            print(f"  Level {L+1:2d}: {n_children:>10d} states  "
+                  f"({term_wins} wins, {term_nm} no-moves, "
+                  f"{n_children - term_wins - term_nm} open)")
 
     # last level has no children → set empty CSR
     max_L = max(level_data.keys())
@@ -319,7 +328,7 @@ def forward_bfs(expand_fn, pos_relation_masks):
 # Backward minimax
 # ---------------------------------------------------------------------------
 
-def backward_minimax(level_data, minimax_fn):
+def backward_minimax(level_data, minimax_fn, quiet=False):
     max_L = max(level_data.keys())
     BLOCK = 256
 
@@ -351,7 +360,8 @@ def backward_minimax(level_data, minimax_fn):
         p0w = int((v ==  1).sum())
         p1w = int((v == -1).sum())
         dr  = int((v ==  0).sum())
-        print(f"  Level {L:2d}: P0-wins={p0w}  P1-wins={p1w}  draws={dr}")
+        if not quiet:
+            print(f"  Level {L:2d}: P0-wins={p0w}  P1-wins={p1w}  draws={dr}")
 
 # ---------------------------------------------------------------------------
 # Verification
