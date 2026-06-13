@@ -8,4 +8,6 @@ examples/
 hi-res-images/
 docs/
 results/
-paper/
+paper/*.aux
+paper/*.log
+paper/*.out
